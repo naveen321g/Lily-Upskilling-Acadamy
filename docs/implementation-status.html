@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LUA — Implementation Status vs. Plan</title>
+<style>
+  @page { margin: 18mm 16mm; }
+  body {
+    font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    color: #1a1a1a;
+    line-height: 1.5;
+    font-size: 12.5px;
+    max-width: 760px;
+    margin: 0 auto;
+  }
+  h1 { font-size: 23px; margin: 0 0 4px; }
+  .subtitle { color: #666; font-size: 12.5px; margin: 0 0 6px; }
+  .meta { color: #888; font-size: 11px; margin: 0 0 24px; }
+  h2 {
+    font-size: 15px;
+    margin: 28px 0 4px;
+    padding-bottom: 4px;
+    border-bottom: 2px solid #2d6a4f;
+    color: #1b4332;
+    page-break-after: avoid;
+  }
+  h3 { font-size: 12.5px; margin: 14px 0 4px; page-break-after: avoid; }
+  p { margin: 4px 0; }
+  code {
+    background: #f1f3f1;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-family: "SF Mono", Consolas, monospace;
+    font-size: 11.5px;
+    color: #1b4332;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 8px 0 4px;
+    font-size: 11.5px;
+  }
+  th, td {
+    border: 1px solid #dcdfdc;
+    padding: 5px 8px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th { background: #eef4f0; }
+  td.status { white-space: nowrap; font-weight: 600; text-align: center; }
+  .done { color: #1b7a3d; }
+  .partial { color: #a06600; }
+  .missing { color: #b3261e; }
+  .blocked { color: #555; }
+  .col-item { width: 26%; }
+  .col-status { width: 12%; }
+  .legend {
+    display: flex;
+    gap: 18px;
+    font-size: 11px;
+    margin: 4px 0 18px;
+    flex-wrap: wrap;
+  }
+  .legend span { white-space: nowrap; }
+  .summary-box {
+    background: #f7f9f7;
+    border: 1px solid #dde5de;
+    border-radius: 6px;
+    padding: 12px 16px;
+    margin: 10px 0 20px;
+    font-size: 12px;
+  }
+  .note {
+    background: #fdf6ec;
+    border: 1px solid #e8d9b8;
+    border-radius: 6px;
+    padding: 8px 12px;
+    margin: 8px 0;
+    font-size: 11.5px;
+  }
+</style>
+</head>
+<body>
+
+<h1>LUA — Implementation Status vs. Plan</h1>
+<p class="subtitle">Cross-check against "Lily Upskilling Academy.pdf" (the product plan)</p>
+<p class="meta">Generated 2026-09-17 from a direct review of the current codebase (routes, server functions, database schema, and live database contents). Structured to follow the plan document's own section order.</p>
+
+<div class="legend">
+  <span class="done">&#9679; Implemented</span>
+  <span class="partial">&#9679; Partial</span>
+  <span class="missing">&#9679; Not implemented</span>
+  <span class="blocked">&#9679; Blocked (external dependency)</span>
+</div>
+
+<div class="summary-box">
+  <strong>Overall:</strong> The core candidate journey (assessments &rarr; AI verification &rarr; certificates &rarr; badges) and almost the entire admin portal are implemented and live against a real Supabase database — well beyond a prototype. The two structural gaps are (1) <strong>Bustler SSO</strong> — fully spec'd but blocked on Bustler providing OAuth credentials, and (2) <strong>fine-grained employee roles</strong> — the plan's "verification officer / support executive / content manager" split doesn't exist; today it's just <code>admin</code> vs <code>reviewer</code>. A handful of admin features are real but noticeably simpler than the plan describes (certificate AI-confidence tiering, fraud detection) — flagged individually below.
+</div>
+
+<h2>1. Bustler Integration</h2>
+<table>
+  <tr><th class="col-item">Plan item</th><th class="col-status">Status</th><th>Notes</th></tr>
+  <tr>
+    <td>Deep-link with pre-filled skill/category</td>
+    <td class="status done">Done</td>
+    <td><code>/assessments?skill=&amp;category=</code> — pre-fills, scrolls to and highlights the matching skill, shows a "Continuing your verification" banner.</td>
+  </tr>
+  <tr>
+    <td>Bustler account login (no separate registration)</td>
+    <td class="status blocked">Blocked</td>
+    <td>Fully specified in <code>docs/bustler-sso-integration.md</code> (signed-JWT handoff design) but not built — LUA has no OAuth client ID/signing key from Bustler yet. Candidates still sign up/in independently (email or Google).</td>
+  </tr>
+  <tr>
+    <td>Sync profile from Bustler</td>
+    <td class="status blocked">Blocked</td>
+    <td>Same blocker as above.</td>
+  </tr>
+  <tr>
+    <td>Reverse sync: badge events &rarr; Bustler webhook</td>
+    <td class="status blocked">Blocked</td>
+    <td>Call sites identified (<code>issueBadge</code>/<code>revokeBadgeAdmin</code>) but no webhook exists — needs Bustler's endpoint + public key.</td>
+  </tr>
+</table>
+
+<h2>2. Candidate Dashboard</h2>
+<table>
+  <tr><th class="col-item">Module</th><th class="col-status">Status</th><th>Notes</th></tr>
+  <tr><td>Overview</td><td class="status done">Done</td><td>"Next action" guidance, quick stat tiles, recent certificates.</td></tr>
+  <tr><td>Skills</td><td class="status done">Done</td><td>Live inventory + (as of this review) an integrated "needs attention" verification summary.</td></tr>
+  <tr><td>Verification Progress</td><td class="status done">Done</td><td>Folded into the Skills page rather than a separate page (a deliberate simplification made during this review — see note below).</td></tr>
+  <tr><td>Assessment History</td><td class="status done">Done</td><td>Full attempt log with scores, pass/fail, resume-in-progress.</td></tr>
+  <tr><td>Certificates</td><td class="status done">Done</td><td>AI-issued + manual upload flow, status tracking.</td></tr>
+  <tr><td>Analytics (candidate-facing)</td><td class="status done">Done</td><td><code>/analytics</code> exists for candidates in addition to the admin one.</td></tr>
+  <tr><td>Profile</td><td class="status done">Done</td></tr>
+  <tr><td>Notifications</td><td class="status done">Done</td><td>Full feed page + bell dropdown; select-and-delete (dismiss) added in this review.</td></tr>
+  <tr><td>AI recommendation (Future)</td><td class="status partial">Partial</td><td>Marked "(Future)" in the plan itself. A "Career Insights" widget exists but shows generic, hardcoded suggestions, not personalized AI output.</td></tr>
+</table>
+<div class="note">Note: earlier in this review, "My Skills," "Verification," and "Verification History" existed as three separate destinations with heavily overlapping content (same per-skill status, same action buttons). Verification Center was merged into My Skills to remove that redundancy; Verification History (the assessment-attempt log) kept its own page since it's a genuinely different thing.</div>
+
+<h2>3. Skill Management</h2>
+<table>
+  <tr><th class="col-item">Plan item</th><th class="col-status">Status</th><th>Notes</th></tr>
+  <tr><td>Add / Remove / View skills</td><td class="status done">Done</td></tr>
+  <tr><td>Request a skill not in the catalog</td><td class="status done">Done</td><td>Goes to an admin review queue (<code>skill_requests</code> table), approve/reject with notes.</td></tr>
+</table>
+
+<h2>4. AI Skill Verification</h2>
+<table>
+  <tr><th class="col-item">Plan item</th><th class="col-status">Status</th><th>Notes</th></tr>
+  <tr><td>Beginner: 5 questions</td><td class="status done">Done</td><td>Matches exactly (<code>LEVEL_CONFIG</code>).</td></tr>
+  <tr><td>Expert: 15 questions</td><td class="status done">Done</td><td>Matches exactly.</td></tr>
+  <tr><td>AI Skill Verified badge on pass</td><td class="status done">Done</td><td>Issued only on an <strong>expert</strong>-level pass. A bug found and fixed in this review: a beginner-only pass was incorrectly being recorded as if it granted this badge, both in the candidate-facing assessments catalog and in admin analytics — now corrected.</td></tr>
+</table>
+
+<h2>5. Certificate Verification</h2>
+<table>
+  <tr><th class="col-item">Plan item</th><th class="col-status">Status</th><th>Notes</th></tr>
+  <tr><td>Upload PDF/image as proof</td><td class="status done">Done</td></tr>
+  <tr><td>Manual review by employees</td><td class="status done">Done</td><td>Approve/Reject with notes; "Request Re-upload" specifically is not a distinct action (candidate can just re-upload after a rejection).</td></tr>
+  <tr><td>Certification Verified badge on approval</td><td class="status done">Done</td></tr>
+  <tr>
+    <td>AI confidence score + auto-verify high-confidence / duplicate check / tampering analysis</td>
+    <td class="status missing">Not implemented</td>
+    <td>The review queue is manual-only for every submission — no AI confidence scoring, no auto-approval tier, no duplicate-detection or tampering analysis at upload time. This is the single largest gap between the plan and the built certificate flow.</td>
+  </tr>
+</table>
+
+<h2>6. Badge System</h2>
+<table>
+  <tr><th class="col-item">Plan item</th><th class="col-status">Status</th><th>Notes</th></tr>
+  <tr><td>Per-skill badges (e.g. Electrician: AI + Certificate)</td><td class="status done">Done</td><td>Badges are scoped <code>(user, skill, type)</code>.</td></tr>
+  <tr><td>Fully Verified Bustler badge</td><td class="status done">Done</td><td>Computed (not stored) — true when every skill on the profile has &ge;1 active verification. Shown on Skills page and Dashboard.</td></tr>
+  <tr><td>Institution Verified badge (Phase 2)</td><td class="status blocked">Placeholder only</td><td>Type wired through the badge system and UI (label, icon, admin filter) so it can be turned on later without a redesign, per the plan's own instruction — but no institution-partner workflow exists yet, correctly, since that's explicitly Phase 2.</td></tr>
+</table>
+
+<h2>7. Customer / Employer View</h2>
+<table>
+  <tr><th class="col-item">Plan item</th><th class="col-status">Status</th><th>Notes</th></tr>
+  <tr><td>Public "View Verification" per skill/certificate</td><td class="status done">Done</td><td><code>/verify/:id</code> — queries the real, live <code>certificates</code> table (score, verifier, issued/expiry, skills covered, unique certificate ID). Confirmed during this review to be live data, not the stale mock fixtures earlier documentation warned about.</td></tr>
+</table>
+
+<h2>8. Phase 2 (Future) — Institution Verification</h2>
+<table>
+  <tr><th class="col-item">Plan item</th><th class="col-status">Status</th><th>Notes</th></tr>
+  <tr><td>Institution partner assessment + badge workflow</td><td class="status blocked">Correctly deferred</td><td>Plan explicitly scopes this to "after Lily Upskilling Academy partners with institutions" and asks only for architectural placeholders now — which exist (see Badge System above).</td></tr>
+</table>
+
+<h2>9. Admin Portal</h2>
+
+<h3>9.1 User Management</h3>
+<table>
+  <tr><th class="col-item">Plan item</th><th class="col-status">Status</th><th>Notes</th></tr>
+  <tr><td>Search/view any candidate profile</td><td class="status done">Done</td></tr>
+  <tr><td>View Profile / History / Certificates</td><td class="status done">Done</td></tr>
+  <tr><td>Suspend</td><td class="status done">Done</td></tr>
+  <tr><td>Reset Assessment</td><td class="status done">Done</td><td>Resets an in-progress attempt.</td></tr>
+  <tr><td>Remove Badge</td><td class="status done">Done</td></tr>
+  <tr><td>Login History</td><td class="status missing">Not implemented</td><td>Not surfaced anywhere in the admin candidate-detail view.</td></tr>
+</table>
+
+<h3>9.2 Skill Management (admin)</h3>
+<table>
+  <tr><th class="col-item">Plan item</th><th class="col-status">Status</th><th>Notes</th></tr>
+  <tr><td>Create / Edit / Delete skills</td><td class="status done">Done</td></tr>
+  <tr><td>Review candidate-submitted new-skill requests</td><td class="status done">Done</td></tr>
+</table>
+
+<h3>9.3 AI Assessment Management</h3>
+<table>
+  <tr><th class="col-item">Plan item</th><th class="col-status">Status</th><th>Notes</th></tr>
+  <tr><td>View assessment details (skill, level, questions, score, duration, pass/fail)</td><td class="status done">Done</td></tr>
+  <tr><td>Performance analytics (pass rate, avg score, attempts per skill)</td><td class="status done">Done</td><td>On the Analytics page.</td></tr>
+  <tr><td>Approve retakes for valid reasons</td><td class="status done">Done</td><td>Retake-request workflow with approve/reject.</td></tr>
+  <tr><td>Reset attempts for technical issues</td><td class="status done">Done</td></tr>
+  <tr><td>Review suspicious attempts / flag</td><td class="status done">Done</td><td>Feeds the Fraud Signals page's "manually flagged" section.</td></tr>
+</table>
+
+<h3>9.4 Certificate Verification Center</h3>
+<table>
+  <tr><th class="col-item">Plan item</th><th class="col-status">Status</th><th>Notes</th></tr>
+  <tr><td>Pending queue with user/skill/organization</td><td class="status done">Done</td></tr>
+  <tr><td>Approve / Reject / Add comments</td><td class="status done">Done</td><td>"Request Re-upload" is not a distinct action.</td></tr>
+  <tr>
+    <td>AI confidence score, auto-verify at high confidence, duplicate check, tampering analysis</td>
+    <td class="status missing">Not implemented</td>
+    <td>Same gap noted in section 5 — every certificate goes through the identical manual pending &rarr; approve/reject path regardless of any confidence signal, because no confidence scoring exists.</td>
+  </tr>
+</table>
+
+<h3>9.5 Badge Management</h3>
+<table>
+  <tr><th class="col-item">Plan item</th><th class="col-status">Status</th><th>Notes</th></tr>
+  <tr><td>View/search all issued badges</td><td class="status done">Done</td></tr>
+  <tr><td>Revoke</td><td class="status done">Done</td></tr>
+  <tr><td>Reissue after re-verification</td><td class="status done">Done</td></tr>
+  <tr><td>Handle badge appeals</td><td class="status done">Done</td><td>Full appeal submission + admin approve/reject flow.</td></tr>
+</table>
+
+<h3>9.6 Analytics Dashboard</h3>
+<table>
+  <tr><th class="col-item">Plan item</th><th class="col-status">Status</th><th>Notes</th></tr>
+  <tr><td>Users monthly growth</td><td class="status done">Done</td><td>6-month chart.</td></tr>
+  <tr><td>Assessments pass rate</td><td class="status done">Done</td></tr>
+  <tr><td>Popular skills (Top 10)</td><td class="status done">Done</td></tr>
+  <tr><td>Average scores per category</td><td class="status done">Done</td></tr>
+  <tr><td>Certificates: verified/rejected/pending</td><td class="status done">Done</td></tr>
+  <tr><td>Badge distribution (incl. Fully Verified)</td><td class="status done">Done</td></tr>
+</table>
+
+<h3>9.7 Fraud Detection Dashboard</h3>
+<table>
+  <tr><th class="col-item">Plan item</th><th class="col-status">Status</th><th>Notes</th></tr>
+  <tr><td>Duplicate certificates</td><td class="status done">Done</td></tr>
+  <tr><td>Repeated failed attempts</td><td class="status done">Done</td></tr>
+  <tr><td>Manually flagged attempts</td><td class="status done">Done</td></tr>
+  <tr><td>Suspicious uploads (behavioral)</td><td class="status missing">Not implemented</td><td rowspan="4">The page's own in-app disclaimer is explicit: "This isn't a fraud-detection model — there's no document forensics, device fingerprinting or duplicate-account detection here." Only the three signals above are computed from existing records; everything else the plan lists is genuinely absent.</td></tr>
+  <tr><td>Multiple accounts</td><td class="status missing">Not implemented</td></tr>
+  <tr><td>Fake certificates (forensics)</td><td class="status missing">Not implemented</td></tr>
+  <tr><td>Edited documents (tampering detection)</td><td class="status missing">Not implemented</td></tr>
+</table>
+
+<h3>9.8 Support Center</h3>
+<table>
+  <tr><th class="col-item">Plan item</th><th class="col-status">Status</th><th>Notes</th></tr>
+  <tr><td>Ticket list with user/issue/status/priority</td><td class="status done">Done</td></tr>
+  <tr><td>Reply</td><td class="status done">Done</td></tr>
+  <tr><td>Close</td><td class="status done">Done</td><td>Via status change to "closed".</td></tr>
+  <tr><td>Escalate</td><td class="status done">Done</td><td>Dedicated "escalated" status.</td></tr>
+</table>
+
+<h3>9.9 Reports</h3>
+<table>
+  <tr><th class="col-item">Plan item</th><th class="col-status">Status</th><th>Notes</th></tr>
+  <tr><td>Daily / Weekly / Monthly reports</td><td class="status done">Done</td><td>"Activity report" with period selector.</td></tr>
+  <tr><td>Certificate report</td><td class="status done">Done</td></tr>
+  <tr><td>Verification report</td><td class="status done">Done</td><td>Badge issuance/revocation export.</td></tr>
+  <tr><td>User Activity report</td><td class="status done">Done</td></tr>
+  <tr><td>Fraud report</td><td class="status done">Done</td><td>Exports the same signals as the Fraud Dashboard (so inherits its scope limits above).</td></tr>
+  <tr><td>Format</td><td class="status partial">Partial</td><td>All exports are CSV; the plan doesn't specify format so this is a reasonable interpretation, not a gap, but worth confirming if a specific format (e.g. PDF) was expected.</td></tr>
+</table>
+
+<h3>9.10 Notifications (admin)</h3>
+<table>
+  <tr><th class="col-item">Plan item</th><th class="col-status">Status</th><th>Notes</th></tr>
+  <tr><td>"20 new certificates awaiting review"</td><td class="status done">Done</td><td>Equivalent pending-certificate alerts exist.</td></tr>
+  <tr><td>"New skill request submitted"</td><td class="status done">Done</td></tr>
+  <tr><td>"User appealed badge rejection"</td><td class="status done">Done</td></tr>
+  <tr><td>"AI confidence below 70%"</td><td class="status missing">Not implemented</td><td>Depends on the AI-confidence scoring that doesn't exist (see 9.4).</td></tr>
+  <tr><td>"Potential duplicate certificate detected"</td><td class="status partial">Partial</td><td>Detectable on the Fraud page, but not pushed as a proactive notification.</td></tr>
+  <tr><td>Dedicated notifications page + sidebar entry, select &amp; delete</td><td class="status done">Done</td><td>Added during this review — previously bell-dropdown only.</td></tr>
+</table>
+
+<h3>9.11 Audit Logs &amp; Employee Roles</h3>
+<table>
+  <tr><th class="col-item">Plan item</th><th class="col-status">Status</th><th>Notes</th></tr>
+  <tr><td>Audit log (employee, action, affected user, timestamp)</td><td class="status done">Done</td><td>Admin &rarr; Settings.</td></tr>
+  <tr>
+    <td>Role-based access (verification officers, support executives, content managers each scoped to their own modules)</td>
+    <td class="status missing">Not implemented</td>
+    <td>Current roles are just <code>admin</code> (full access) and <code>reviewer</code> — no scoping of which admin nav sections a given employee can see/use by job function. This is the second major structural gap alongside Bustler SSO.</td>
+  </tr>
+</table>
+
+<h2>10. Known platform-level issue (not a plan gap)</h2>
+<p>This project's dev/build toolchain runs on beta releases (<code>vite@8.1.4</code>, <code>nitro@3.0.260603-beta</code>, pre-1.0 <code>@tanstack/react-start</code>). Several distinct instability bugs were traced back to this combination during this review (a client-side <code>process.env</code> define failure, dependency-optimizer reload glitches, an SSR/hydration race). Worth flagging separately from feature completeness since it affects reliability, not scope.</p>
+
+</body>
+</html>

@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LUA — Architecture Overview</title>
+<style>
+  @page { margin: 20mm 18mm; }
+  body {
+    font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    color: #1a1a1a;
+    line-height: 1.55;
+    font-size: 13px;
+    max-width: 720px;
+    margin: 0 auto;
+  }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  .subtitle { color: #666; font-size: 13px; margin: 0 0 28px; }
+  h2 {
+    font-size: 15px;
+    margin: 26px 0 10px;
+    padding-bottom: 4px;
+    border-bottom: 2px solid #2d6a4f;
+    color: #1b4332;
+  }
+  h3 { font-size: 13px; margin: 16px 0 6px; }
+  p { margin: 6px 0; }
+  ul { margin: 6px 0; padding-left: 20px; }
+  li { margin: 3px 0; }
+  code {
+    background: #f1f3f1;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-family: "SF Mono", Consolas, monospace;
+    font-size: 12px;
+    color: #1b4332;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 10px 0;
+    font-size: 12.5px;
+  }
+  th, td {
+    border: 1px solid #dcdfdc;
+    padding: 6px 10px;
+    text-align: left;
+  }
+  th { background: #eef4f0; }
+  .box {
+    background: #f7f9f7;
+    border: 1px solid #dde5de;
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin: 10px 0;
+  }
+  .rough-edges {
+    background: #fdf6ec;
+    border: 1px solid #e8d9b8;
+  }
+  .layer-order {
+    counter-reset: step;
+  }
+  .layer-order li { list-style: none; }
+  .layer-order li::before {
+    counter-increment: step;
+    content: counter(step) ". ";
+    font-weight: 600;
+    color: #2d6a4f;
+  }
+</style>
+</head>
+<body>
+
+<h1>LUA — Architecture Overview</h1>
+<p class="subtitle">Lily Upskilling Academy — skill-verification platform</p>
+
+<p><strong>Type</strong>: Skill-verification platform (assessments &rarr; AI/expert/certificate review &rarr; verified badges &rarr; public employer lookup), not an LMS.</p>
+
+<h2>Stack</h2>
+<table>
+  <tr><th>Layer</th><th>Technology</th></tr>
+  <tr><td>Framework</td><td><strong>TanStack Start</strong> (React 19 + Vite, file-based routing) — not Next.js</td></tr>
+  <tr><td>Routing</td><td><strong>TanStack Router</strong> — routes in <code>src/routes/</code>, generated tree in <code>routeTree.gen.ts</code></td></tr>
+  <tr><td>Data fetching</td><td><strong>TanStack Query</strong></td></tr>
+  <tr><td>Styling</td><td><strong>Tailwind CSS v4</strong> (CSS-first, no config file) + <strong>shadcn/ui</strong> (<code>src/components/ui/</code>)</td></tr>
+  <tr><td>Backend</td><td><strong>Supabase</strong> (Postgres + Auth), accessed via TanStack Start server functions</td></tr>
+  <tr><td>AI</td><td><strong>Lovable AI Gateway</strong> (MCQ generation, feedback) + <strong>Groq</strong> (conversational interview feature)</td></tr>
+  <tr><td>Build/host</td><td><strong>Vite</strong> + <strong>Nitro</strong> (Cloudflare target), wrapped by <code>@lovable.dev/vite-tanstack-config</code></td></tr>
+  <tr><td>Managed by</td><td><strong>Lovable</strong> (lovable.dev) — syncs from a connected git branch</td></tr>
+</table>
+
+<h2>Request lifecycle</h2>
+<ol class="layer-order">
+  <li><strong>Routing</strong>: file-based, under <code>src/routes/</code>. <code>_authenticated/</code> is a pathless layout whose <code>beforeLoad</code> calls <code>supabase.auth.getUser()</code> and redirects unauthenticated users to <code>/auth</code>. Every route under it inherits that guard and gets <code>{ user }</code> in context.</li>
+  <li><strong>Rendering</strong>: SSR on first load via TanStack Start + Nitro; client takes over via hydration. <code>__root.tsx</code> is the app shell (<code>&lt;html&gt;</code>/<code>&lt;head&gt;</code>/<code>&lt;Scripts&gt;</code>).</li>
+  <li><strong>Layout split</strong>: <code>DashboardChrome</code> picks between <code>AdminSidebar</code> (<code>/admin/*</code>) and <code>CandidateSidebar</code> (everything else) based on the URL path, and separately picks which notification bell to show the same way.</li>
+</ol>
+
+<h2>Server functions: the three-file pattern</h2>
+<p>Every server-backed feature is split into:</p>
+<ul>
+  <li><strong><code>*-shared.ts</code></strong> — plain types/constants, safe on client and server (e.g. <code>assessment-shared.ts</code>, <code>badges-shared.ts</code>).</li>
+  <li><strong><code>*.functions.ts</code></strong> — <code>createServerFn(...)</code> RPC definitions. Ships to the client as a thin stub; must never import secrets directly.</li>
+  <li><strong><code>*.server.ts</code></strong> — the real logic (service-role Supabase queries, AI gateway calls, <code>assertAdmin</code>). Loaded only from inside a <code>.functions.ts</code> handler.</li>
+</ul>
+<p>This is enforced by ESLint (bans the <code>server-only</code> import pattern) so secrets can't leak into the client bundle by accident.</p>
+
+<h2>Auth</h2>
+<p>Three distinct Supabase clients, each with one job:</p>
+<ul>
+  <li><code>client.ts</code> — browser/SSR, RLS-scoped, publishable key.</li>
+  <li><code>client.server.ts</code> (<code>supabaseAdmin</code>) — service-role, bypasses RLS, server-only.</li>
+  <li><code>auth-middleware.ts</code> (<code>requireSupabaseAuth</code>) — validates the caller's JWT and injects an RLS-scoped client authenticated <em>as that user</em> into server function context.</li>
+</ul>
+<p>Admin authorization is a Postgres RPC (<code>has_role()</code>, <code>SECURITY DEFINER</code>), checked via <code>assertAdmin()</code> against the user's own RLS-scoped client — not a client-side flag.</p>
+
+<h2>Data model (Postgres, RLS on every table)</h2>
+<ul>
+  <li><code>app_role</code> enum (<code>candidate | employer | reviewer | admin</code>) + <code>user_roles</code> + <code>has_role()</code>.</li>
+  <li><code>skills</code> (catalog) / <code>user_skills</code> (a candidate's own portfolio — status, score, trust, active verifications).</li>
+  <li><code>questions</code> (bank) &rarr; <code>assessment_attempts</code> (graded server-side, <code>question_ids</code> fixed per attempt).</li>
+  <li><code>certificates</code> (AI-issued or uploaded, admin-approved, <code>is_public</code> gates the employer verify page).</li>
+  <li><code>badges</code> (<code>ai</code> | <code>certificate</code> | <code>institution</code> [placeholder], per <code>user_id + skill_id + type</code>) + <code>badge_appeals</code>.</li>
+  <li><code>admin_notifications</code> / <code>support_tickets</code> / <code>admin_audit_log</code> / <code>skill_requests</code> / <code>retake_requests</code>.</li>
+  <li>"Fully Verified Bustler" is <em>computed</em>, not stored — true when every skill in a candidate's portfolio has &ge;1 active verification (<code>isFullyVerifiedBustler()</code> in <code>skills-shared.ts</code>).</li>
+</ul>
+
+<h2>AI integration</h2>
+<p>Both features hit <code>ai.gateway.lovable.dev</code> with <code>LOVABLE_API_KEY</code>, model <code>openai/gpt-5.6-sol</code>, <code>response_format: json_object</code>, parsed defensively:</p>
+<ul>
+  <li><code>admin.server.ts::generateQuestionsWithAi</code> — draft question generation.</li>
+  <li><code>assessment.server.ts::evaluateWithAi</code> — post-attempt feedback; <strong>never throws</strong>, falls back to a templated summary.</li>
+</ul>
+<p>Separately, an AI Interview feature (Groq-backed) provides a conversational verification path alongside the MCQ assessments.</p>
+
+<h2>Error handling (three layers)</h2>
+<ol class="layer-order">
+  <li><code>start.ts</code> — request-level middleware, rethrows intentional HTTP errors, logs+static-pages everything else.</li>
+  <li><code>server.ts</code> — wraps the SSR fetch entrypoint, detects h3-swallowed throws.</li>
+  <li><code>error-capture.ts</code> — global <code>window.onerror</code>/<code>unhandledrejection</code> listener, gives <code>server.ts</code> a ~5s window to recover the real stack trace.</li>
+</ol>
+<p>Client-side React errors go through <code>__root.tsx</code>'s <code>ErrorComponent</code>, forwarded to Lovable's <code>window.__lovableEvents</code> if present.</p>
+
+<div class="box rough-edges">
+  <h3 style="margin-top:0;">Known rough edges (as of this review)</h3>
+  <ul>
+    <li>The dev toolchain (<code>vite@8.1.4</code> beta, <code>nitro@3.0.260603-beta</code>, pre-1.0 <code>@tanstack/react-start</code>) has real instability — hydration-mismatch races, a <code>process.env</code> define bug (worked around via a <code>window.process</code> polyfill in <code>__root.tsx</code>), dependency-optimizer reload glitches.</li>
+    <li>Bustler SSO is fully specified (<code>docs/bustler-sso-integration.md</code>) but blocked on Bustler providing signing credentials — nothing to build on our side yet.</li>
+    <li>Admin roles are currently just <code>admin</code>/<code>reviewer</code>, not the finer-grained "verification officer / support executive / content manager" split the product spec describes.</li>
+  </ul>
+</div>
+
+</body>
+</html>
