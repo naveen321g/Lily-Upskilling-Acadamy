@@ -7,6 +7,7 @@ import { Link2, Loader2, ShieldCheck, Mail, Lock, User as UserIcon } from "lucid
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -139,9 +140,8 @@ function SignInForm() {
         />
       </Field>
       <Field icon={Lock} label="Password" id="signin-password">
-        <Input
+        <PasswordInput
           id="signin-password"
-          type="password"
           autoComplete="current-password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
@@ -218,9 +218,8 @@ function SignUpForm({ onDone }: { onDone: () => void }) {
         />
       </Field>
       <Field icon={Lock} label="Password" id="signup-password">
-        <Input
+        <PasswordInput
           id="signup-password"
-          type="password"
           autoComplete="new-password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
