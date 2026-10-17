@@ -1,6 +1,6 @@
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useState } from "react";
-import { Bell, BellRing, ClipboardCheck, Home, MoreHorizontal, Sparkles, Trash2, X } from "lucide-react";
+import { Bell, BellRing, ClipboardCheck, Home, MoreHorizontal, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -293,7 +293,6 @@ function TopBar({ isAdminSection }: { isAdminSection: boolean }) {
 
 const MOBILE_TABS = [
   { label: "Home", to: "/dashboard", icon: Home },
-  { label: "Skills", to: "/skills", icon: Sparkles },
   { label: "Assessments", to: "/assessments", icon: ClipboardCheck },
 ];
 

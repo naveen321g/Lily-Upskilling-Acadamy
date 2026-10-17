@@ -10,7 +10,6 @@ import {
   LogOut,
   MessageSquare,
   Settings,
-  Sparkles,
   User,
   Wrench,
 } from "lucide-react";
@@ -60,17 +59,6 @@ export function CandidateSidebar({
                 <SidebarMenuButton asChild isActive={pathname === "/dashboard"} tooltip="Dashboard">
                   <Link to="/dashboard">
                     <LayoutDashboard /> <span>Dashboard</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={isActivePrefix(pathname, "/skills")}
-                  tooltip="My Skills"
-                >
-                  <Link to="/skills">
-                    <Sparkles /> <span>My Skills</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
