@@ -2,8 +2,6 @@
 
 This runs the whole app on one machine: a Node.js server plus a **PostgreSQL** database. You don't need Supabase, Docker or any cloud account.
 
-> Ignore `README.md`. It's outdated and describes a Next.js setup. The app actually uses **TanStack Start** (React 19 + Vite).
-
 ## 1. Requirements
 
 - **Node.js 22.12 or newer**. Check with `node -v`. Download it from https://nodejs.org.
@@ -24,17 +22,33 @@ DATABASE_URL=postgresql://postgres:YOUR_PASSWORD@localhost:5432/lua
 
 ```sh
 npm install
+```
+
+Then do **one** of the following.
+
+**A. You received a data backup** (`lua-database.sql` plus a `.local-storage` folder). This restores everything as it was: users, certificates, attempts and settings.
+
+1. Copy the `.local-storage` folder into the project folder, next to `package.json`.
+2. Run:
+   ```sh
+   npm run db:restore -- path/to/lua-database.sql
+   ```
+3. Skip step 4: the admin accounts are already in the backup, with the same passwords as before.
+
+**B. Starting fresh** (empty database with the default skills and questions):
+
+```sh
 npm run db:setup
 ```
 
-`db:setup` does three things:
+`db:setup` (option B) does three things:
 1. Creates the `lua` database.
 2. Applies `db/bootstrap.sql`.
 3. Applies every migration in `supabase/migrations/`.
 
 Running it again is safe: migrations that were already applied are skipped.
 
-## 4. Create the first admin account
+## 4. Create the first admin account (fresh setup only)
 
 ```sh
 npm run db:create-user -- admin@example.com "a-strong-password" --admin --name "Admin"
@@ -85,11 +99,13 @@ The server listens on http://localhost:3000. To use a different port, set `PORT`
 
 ## Backups
 
-All data is in PostgreSQL, and uploaded files are in `LOCAL_STORAGE_DIR`. Back up both:
+All data is in PostgreSQL, and uploaded files are in `LOCAL_STORAGE_DIR` (default `.local-storage`). Back up both. `pg_dump` comes with PostgreSQL, in its `bin` folder:
 
 ```sh
-pg_dump "postgresql://postgres:YOUR_PASSWORD@localhost:5432/lua" > lua-backup.sql
+pg_dump --inserts --no-owner -f lua-database.sql "postgresql://postgres:YOUR_PASSWORD@localhost:5432/lua"
 ```
+
+To restore that file on a new machine, use `npm run db:restore -- lua-database.sql` (option A in step 3).
 
 ## Troubleshooting
 

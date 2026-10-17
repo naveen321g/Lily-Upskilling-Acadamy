@@ -12,6 +12,7 @@
     "db:setup": "node scripts/db-setup.mjs",
     "db:create-user": "node scripts/db-create-user.mjs",
     "db:import-supabase": "node scripts/import-from-supabase.mjs",
+    "db:restore": "node scripts/db-restore.mjs",
     "lint": "eslint .",
     "format": "prettier --write .",
     "test": "vitest run"
