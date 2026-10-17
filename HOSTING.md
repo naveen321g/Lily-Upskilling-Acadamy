@@ -42,6 +42,17 @@ npm run db:create-user -- admin@example.com "a-strong-password" --admin --name "
 
 Anyone can sign up as a normal candidate from the website. Only the account created with `--admin` can use the admin pages.
 
+### Optional: copy existing data from Supabase
+
+If the app previously ran on Supabase, add `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` to `.env`, then run:
+
+```sh
+npm run db:import-supabase -- --dry-run   # preview what would be copied
+npm run db:import-supabase                # copy it
+```
+
+The import copies every table, the user accounts and the uploaded certificate files. It replaces the local data and keeps accounts that exist only locally. Supabase doesn't expose passwords, so give each copied user a new password with `npm run db:create-user -- <email> "<new-password>"`, or have them use "Forgot password".
+
 ## 5. Run
 
 **Development** (auto-reloads when code changes):

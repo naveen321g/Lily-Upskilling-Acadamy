@@ -23,6 +23,7 @@ bun run format     # prettier --write .
 bun run start      # run the production build (.output/server/index.mjs) with .env
 bun run db:setup   # create the PostgreSQL database + apply db/bootstrap.sql and supabase/migrations/
 bun run db:create-user -- <email> <password> [--admin] [--name "Full Name"]
+bun run db:import-supabase [-- --dry-run]  # one-time copy of a Supabase project's data (needs SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY)
 ```
 
 `vitest` is installed with a `test` script, but there are no tests yet.

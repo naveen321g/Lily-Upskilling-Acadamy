@@ -11,6 +11,7 @@
     "start": "node --env-file-if-exists=.env .output/server/index.mjs",
     "db:setup": "node scripts/db-setup.mjs",
     "db:create-user": "node scripts/db-create-user.mjs",
+    "db:import-supabase": "node scripts/import-from-supabase.mjs",
     "lint": "eslint .",
     "format": "prettier --write .",
     "test": "vitest run"
