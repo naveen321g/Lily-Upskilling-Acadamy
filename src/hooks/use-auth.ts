@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Session, User } from "@supabase/supabase-js";
+import type { AuthSession as Session, AuthUser as User } from "@/lib/auth/auth-shared";
 import { supabase } from "@/integrations/supabase/client";
 
 export function useAuth() {

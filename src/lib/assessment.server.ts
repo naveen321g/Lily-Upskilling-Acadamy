@@ -69,7 +69,7 @@ export function gradeAttempt(questions: QuestionRow[], answers: AttemptAnswers) 
   return { details, correctCount, score: Math.round((correctCount / total) * 100) };
 }
 
-/** Ask Lovable AI for a qualitative evaluation of the attempt. Never throws. */
+/** Ask Groq for a qualitative evaluation of the attempt. Never throws (falls back to a template). */
 export async function evaluateWithAi(args: {
   skillName: string;
   level: AssessmentLevel;
@@ -81,49 +81,41 @@ export async function evaluateWithAi(args: {
     summary: args.passed
       ? `You scored ${args.score}% on the ${args.level} ${args.skillName} assessment and met the pass mark.`
       : `You scored ${args.score}% on the ${args.level} ${args.skillName} assessment, below the pass mark.`,
-    strengths: args.details.filter((d) => d.correct).slice(0, 3).map((d) => d.prompt),
-    gaps: args.details.filter((d) => !d.correct).slice(0, 3).map((d) => d.prompt),
+    strengths: args.details
+      .filter((d) => d.correct)
+      .slice(0, 3)
+      .map((d) => d.prompt),
+    gaps: args.details
+      .filter((d) => !d.correct)
+      .slice(0, 3)
+      .map((d) => d.prompt),
     recommendation: args.passed
       ? "Move on to the next verification layer to strengthen your trust score."
       : "Review the explanations below and retake the assessment when you are ready.",
   };
 
-  const key = process.env.LOVABLE_API_KEY;
-  if (!key) return fallback;
+  const { completeJson, isAiConfigured } = await import("./ai.server");
+  if (!isAiConfigured()) return fallback;
 
   const transcript = args.details
-    .map((d, i) => `${i + 1}. ${d.prompt}\n   Result: ${d.correct ? "correct" : "incorrect"} (answer: ${d.correctAnswer})`)
+    .map(
+      (d, i) =>
+        `${i + 1}. ${d.prompt}\n   Result: ${d.correct ? "correct" : "incorrect"} (answer: ${d.correctAnswer})`,
+    )
     .join("\n");
 
   try {
-    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Lovable-API-Key": key },
-      body: JSON.stringify({
-        model: "openai/gpt-5.6-sol",
-        reasoning_effort: "none",
-        response_format: { type: "json_object" },
-        messages: [
-          {
-            role: "system",
-            content:
-              "You are an assessment evaluator for Lily Upskilling Academy. Given a candidate's assessment results, reply ONLY with JSON matching {\"summary\": string, \"strengths\": string[], \"gaps\": string[], \"recommendation\": string}. Keep the summary under 60 words, at most 4 strengths and 4 gaps, each a short phrase naming a concept (not a restated question). Be direct, professional and specific.",
-          },
-          {
-            role: "user",
-            content: `Skill: ${args.skillName}\nLevel: ${args.level}\nScore: ${args.score}% (${args.passed ? "passed" : "failed"})\n\nResults:\n${transcript}`,
-          },
-        ],
-      }),
+    const parsed = await completeJson<Partial<AiFeedback>>({
+      system:
+        'You are an assessment evaluator for Lily Upskilling Academy. Given a candidate\'s assessment results, reply ONLY with JSON matching {"summary": string, "strengths": string[], "gaps": string[], "recommendation": string}. Keep the summary under 60 words, at most 4 strengths and 4 gaps, each a short phrase naming a concept (not a restated question). Be direct, professional and specific.',
+      user: `Skill: ${args.skillName}\nLevel: ${args.level}\nScore: ${args.score}% (${args.passed ? "passed" : "failed"})\n\nResults:\n${transcript}`,
+      maxTokens: 1200,
     });
-    if (!res.ok) return fallback;
-    const json = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-    const content = json.choices?.[0]?.message?.content;
-    if (!content) return fallback;
-    const parsed = JSON.parse(content) as Partial<AiFeedback>;
     return {
       summary: typeof parsed.summary === "string" ? parsed.summary : fallback.summary,
-      strengths: Array.isArray(parsed.strengths) ? parsed.strengths.slice(0, 4).map(String) : fallback.strengths,
+      strengths: Array.isArray(parsed.strengths)
+        ? parsed.strengths.slice(0, 4).map(String)
+        : fallback.strengths,
       gaps: Array.isArray(parsed.gaps) ? parsed.gaps.slice(0, 4).map(String) : fallback.gaps,
       recommendation:
         typeof parsed.recommendation === "string" ? parsed.recommendation : fallback.recommendation,
@@ -136,7 +128,11 @@ export async function evaluateWithAi(args: {
 export function certificateCode(skillSlug: string) {
   const token = Math.random().toString(36).slice(2, 6).toUpperCase();
   const year = new Date().getFullYear();
-  const prefix = skillSlug.replace(/[^a-z]/g, "").slice(0, 3).toUpperCase() || "LUA";
+  const prefix =
+    skillSlug
+      .replace(/[^a-z]/g, "")
+      .slice(0, 3)
+      .toUpperCase() || "LUA";
   return `LUA-${prefix}-${year}-${token}`;
 }
 

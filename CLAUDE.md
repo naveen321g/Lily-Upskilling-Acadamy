@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-LUA (Lily Upskilling Academy) — a skill-verification platform (practical assessments, AI evaluation, employer-facing certificate verification). Built with **TanStack Start** (React 19 + Vite + file-based routing), not Next.js. Managed through **Lovable** (lovable.dev): commits pushed to the connected branch sync back into the Lovable editor, so keep the branch buildable — see `AGENTS.md` for the rule against rewriting published history (no force-push/rebase/amend of pushed commits).
+LUA (Lily Upskilling Academy) — a skill-verification platform (practical assessments, AI evaluation, employer-facing certificate verification). Built with **TanStack Start** (React 19 + Vite + file-based routing), not Next.js. The project was scaffolded in **Lovable** (lovable.dev), but on this branch every Lovable dependency is gone: it's a self-hosted app (Node.js + PostgreSQL + Groq). `main` is still connected to Lovable; don't push this branch there.
 
-**`README.md` is stale and misleading**: it's the original Lovable prompt used to scaffold the landing page and describes a Next.js App Router stack. Ignore its tech-stack/structure instructions — the actual stack is TanStack Start, and routes live in `src/routes/`, not `app/`.
+`README.md` is a short overview. `HOSTING.md` has the setup and hosting steps for end users. `docs/` (HTML/PDF) describes the earlier Supabase + Lovable architecture and is out of date.
 
 ## Commands
 
@@ -20,11 +20,16 @@ bun run build:dev  # build in development mode
 bun run preview    # preview a production build
 bun run lint       # eslint .
 bun run format     # prettier --write .
+bun run start      # run the production build (.output/server/index.mjs) with .env
+bun run db:setup   # create the PostgreSQL database + apply db/bootstrap.sql and supabase/migrations/
+bun run db:create-user -- <email> <password> [--admin] [--name "Full Name"]
 ```
 
-There is no test suite/framework configured in this repo currently.
+`vitest` is installed with a `test` script, but there are no tests yet.
 
-`bunfig.toml` enforces a 24h supply-chain guard (`minimumReleaseAge`) on new dependency versions; only a short allowlist of `@lovable.dev/*` packages bypasses it. Confirm with the user before adding new bypass entries.
+**Local PostgreSQL, not Supabase (branch `local-postgres`).** The app runs against a plain PostgreSQL database (`DATABASE_URL`). Supabase is no longer used, and `@supabase/supabase-js` isn't a dependency. `HOSTING.md` has the end-user setup steps.
+
+`bunfig.toml` enforces a 24h supply-chain guard (`minimumReleaseAge`) on new dependency versions; nothing bypasses it. Confirm with the user before adding a `minimumReleaseAgeExcludes` entry.
 
 ## Architecture
 
@@ -38,23 +43,30 @@ Server-backed features (`src/lib/admin*`, `src/lib/assessment*`) are split into 
 
 - `*-shared.ts` — plain types/constants safe on both client and server (e.g. `assessment-shared.ts`, `admin-shared.ts`).
 - `*.functions.ts` — `createServerFn(...)` definitions (TanStack Start RPCs). These ship to the client bundle as thin stubs, so they must not import server-only secrets directly.
-- `*.server.ts` — the actual server-only logic (service-role queries, calls to the Lovable AI gateway, `assertAdmin`). Loaded only from within a `.functions.ts` handler, generally via a dynamic `await import(...)` (see `admin()` in `assessment.server.ts`).
+- `*.server.ts` — the actual server-only logic (service-role queries, calls to Groq, `assertAdmin`). Loaded only from within a `.functions.ts` handler, generally via a dynamic `await import(...)` (see `admin()` in `assessment.server.ts`).
 
 ESLint enforces the naming convention: importing the Next.js-style `server-only` package is banned (`eslint.config.js`), and modules meant to be server-only should be suffixed `*.server.ts` (or use `@tanstack/react-start/server-only`) instead. Route files and `*.functions.ts` are part of the client bundle — never put secrets or `SUPABASE_SERVICE_ROLE_KEY` usage there directly.
 
-### Auth plumbing
+### Database + auth plumbing (Supabase compatibility layer)
 
-Three distinct Supabase entry points, each with a specific purpose — don't mix them up:
+The code was written against supabase-js. Instead of rewriting ~40 files, `src/integrations/supabase/` keeps the same exports (`supabase`, `supabaseAdmin`, `requireSupabaseAuth`), now backed by local PostgreSQL.
 
-- `src/integrations/supabase/client.ts` — browser/SSR client using the publishable key, RLS-scoped, session persisted to `localStorage`.
-- `src/integrations/supabase/client.server.ts` — service-role client (`supabaseAdmin`) that bypasses RLS. Server-only; import it lazily inside server handlers, not at module top-level from anything that isn't itself a `.server.ts` file.
-- `src/integrations/supabase/auth-middleware.ts` (`requireSupabaseAuth`) — a server `createServerFn` middleware that validates the caller's Bearer JWT (via `getClaims`) and injects `context.{ supabase, userId, claims }`, where `context.supabase` is a fresh RLS-scoped client authenticated as that user.
+- `src/lib/db/query-builder.ts`: an isomorphic, supabase-js-compatible builder (`from().select().eq().order().limit().single()`, `insert/update/upsert/delete`, `rpc`). It only builds a serialisable `QuerySpec`. It implements just the subset the app uses; add any new supabase-js method there before using it.
+- `src/lib/db/sql.server.ts`: compiles a `QuerySpec` to SQL, mirroring PostgREST. It resolves embedded relations like `skills(name)` through foreign keys read from `pg_catalog`, sends JSON values to json/jsonb columns, and returns errors as `{ data: null, error }` instead of throwing.
+- `src/lib/db/pg.server.ts`: the `pg` pool and `withRole()`. `service` runs as the DB owner and bypasses RLS. `user` runs `SET LOCAL ROLE authenticated` with `request.jwt.claim.sub = userId`, so `auth.uid()` and the RLS policies work unchanged. `anon` runs as the `anon` role.
+- `db/bootstrap.sql`: recreates what the Supabase migrations expect: the `anon`/`authenticated`/`service_role` roles, `auth.users`, `auth.uid()`, `storage.buckets/objects`, `storage.foldername()`. It also adds `auth.sessions`, `auth.password_reset_tokens` and `app_meta.applied_migrations`. **New migrations still go in `supabase/migrations/`**; `scripts/db-setup.mjs` applies them in filename order.
 
-The browser only attaches the JWT to serverFn calls because `attachSupabaseAuth` (`auth-attacher.ts`) is registered as global `functionMiddleware` in `src/start.ts` — if that wiring is ever removed, every `requireSupabaseAuth`-guarded call breaks silently with 401s.
+Entry points, each with a specific purpose:
 
-Admin authorization is a Postgres RPC, not a client-side role check: `assertAdmin()` (`admin.server.ts`) calls `has_role(_user_id, 'admin')`, a `SECURITY DEFINER` SQL function, against the *user's own* RLS-scoped client (not `supabaseAdmin`).
+- `src/integrations/supabase/client.ts` (`supabase`): the browser/SSR client. `.from()` and `.rpc()` call the `runClientQuery` / `runClientRpc` server functions (`src/lib/db/client-query.functions.ts`). Those run as `authenticated` (signed in) or `anon`, never as the owner, so table GRANTs and RLS decide access, the same as with PostgREST. `.auth.*` calls the auth server functions, and `.storage.from(b).upload()` POSTs to `/api/storage/upload/...`.
+- `src/integrations/supabase/client.server.ts` (`supabaseAdmin`): the owner-role client that bypasses RLS, plus `.auth.admin` (listUsers / getUserById / updateUserById for bans) and `.storage`. Server-only. Import it lazily inside server handlers.
+- `src/integrations/supabase/auth-middleware.ts` (`requireSupabaseAuth`): resolves the session cookie and injects `context.{ supabase, userId, claims }`, where `context.supabase` is a `user`-role (RLS-scoped) client.
 
-Several files under `src/integrations/supabase/` and `src/integrations/lovable/` are headed "This file is automatically generated. Do not edit it directly." — these are regenerated by Lovable's Supabase/auth integration tooling; hand edits can be silently overwritten on the next sync.
+Auth is email + password only (`src/lib/auth/`). Passwords are hashed with scrypt (`password.server.ts`). Sessions are random tokens stored hashed in `auth.sessions`, behind an httpOnly `lua_session` cookie. The cookie is sent automatically, so there's no client-side token-attaching middleware anymore. Sign-up signs the user in immediately; there's no email confirmation. Password-reset links are emailed through SMTP (`mail.server.ts`), or printed to the server console when `SMTP_HOST` isn't set. Banning sets `auth.users.banned_until` and deletes the user's sessions.
+
+Admin authorization is unchanged. `assertAdmin()` (`admin.server.ts`) calls the `has_role(_user_id, 'admin')` SECURITY DEFINER function through the user's own RLS-scoped client.
+
+File storage (`src/lib/storage/storage.server.ts`): object metadata goes in `storage.objects`, so the storage RLS policies still apply. The bytes go on disk under `LOCAL_STORAGE_DIR` (default `./.local-storage`). Downloads go through short-lived HMAC-signed URLs served by `src/routes/api.storage.$.tsx`.
 
 ### Layered error handling
 
@@ -64,16 +76,19 @@ Errors are caught at three levels, each guarding against a different failure mod
 2. `src/server.ts` — wraps the whole SSR `fetch` entrypoint. It also detects the case where h3 (Nitro's HTTP layer) has swallowed an in-handler throw into a generic `{"unhandled":true,"message":"HTTPError"}` 500 response that a `try/catch` here can't see directly (`normalizeCatastrophicSsrResponse`).
 3. `src/lib/error-capture.ts` — a global `error`/`unhandledrejection` listener that stashes the last thrown error for ~5s, so `server.ts` can recover the real stack trace even after h3 has swallowed it.
 
-`src/lib/error-page.ts` renders the static (no-JS, no-dependency) fallback HTML shown when SSR itself has failed. `src/lib/lovable-error-reporting.ts` forwards client-side React error-boundary errors to Lovable's `window.__lovableEvents` if present (used from `__root.tsx`'s `ErrorComponent`).
+`src/lib/error-page.ts` renders the static (no-JS, no-dependency) fallback HTML shown when SSR itself has failed.
 
-### AI features (Lovable AI Gateway)
+### AI features (Groq)
 
-Both AI-backed features call `https://ai.gateway.lovable.dev/v1/chat/completions` with the `LOVABLE_API_KEY` env var and model `openai/gpt-5.6-sol`, always requesting `response_format: json_object` and parsing/validating the JSON defensively:
+Every AI feature uses Groq with a single key, `BUSTLER_GROQ_API_KEY`. The model, base URL and timeouts come from `createEngineConfig()` (`src/lib/interview-engine/config.ts`).
+
+- The AI Interview uses `src/lib/interview-engine/` (GroqClient, prompts, scoring).
+- The two MCQ-side features call `completeJson()` (`src/lib/ai.server.ts`), which reuses the same `GroqClient`. JSON is requested **in the prompt** and parsed with `parseJsonObject`, not via `response_format`, because strict JSON mode fails on Groq's gpt-oss models (see `GroqClient.body()`). The output is then validated defensively:
 
 - `admin.server.ts::generateQuestionsWithAi` — generates draft MCQ questions for the admin question bank, avoiding duplicates of existing prompts.
-- `assessment.server.ts::evaluateWithAi` — produces qualitative feedback (summary/strengths/gaps/recommendation) after an attempt is graded; **never throws** — falls back to a templated summary if the key is missing, the gateway errors, or the response doesn't parse.
+- `assessment.server.ts::evaluateWithAi` — produces qualitative feedback (summary/strengths/gaps/recommendation) after an attempt is graded; **never throws** — falls back to a templated summary if the key is missing, Groq errors, or the response doesn't parse.
 
-### Data model (Supabase/Postgres, `supabase/migrations/`)
+### Data model (PostgreSQL, `supabase/migrations/`)
 
 RLS is enabled on every table. Key shape:
 
@@ -88,7 +103,7 @@ Assessment level config (question count, duration, pass mark) is centralized in 
 
 ### Skills dashboard and public verify page are live data
 
-`src/routes/_authenticated/skills.tsx` (candidate Skills dashboard) is fully live against Supabase via `listMySkills` / `listSkillCatalog` / `addMySkill` / `removeMySkill` (`skills.functions.ts`). `src/routes/verify.$id.tsx` and `src/routes/certificates.$id.tsx` (public employer-facing pages) query the real `certificates` table directly (`status = 'approved'`, `is_public = true`). `src/lib/skills.ts` only holds unrelated career-recommendation fixture data (`RECOMMENDATIONS`) now; `src/lib/certificates.ts` no longer exists.
+`src/routes/_authenticated/skills.tsx` (candidate Skills dashboard) is fully live against the database via `listMySkills` / `listSkillCatalog` / `addMySkill` / `removeMySkill` (`skills.functions.ts`). `src/routes/verify.$id.tsx` and `src/routes/certificates.$id.tsx` (public employer-facing pages) query the real `certificates` table directly (`status = 'approved'`, `is_public = true`). `src/lib/skills.ts` only holds unrelated career-recommendation fixture data (`RECOMMENDATIONS`) now; `src/lib/certificates.ts` no longer exists.
 
 ### Styling
 
@@ -98,4 +113,6 @@ Path alias: `@/*` → `src/*` (see `tsconfig.json` / `components.json`).
 
 ### Vite config
 
-`vite.config.ts` wraps `@lovable.dev/vite-tanstack-config`, which already bundles TanStack devtools, `tanstackStart`, `viteReact`, `tailwindcss`, `tsConfigPaths`, nitro (cloudflare build target by default), `VITE_*` env injection, and sandbox detection. Do not re-add any of those plugins manually — the comment at the top of the file lists exactly what's already included.
+`vite.config.ts` is a plain Vite config: `tailwindcss`, `tsConfigPaths`, `tanstackStart` (server entry → `src/server.ts`, with import protection that fails the build if client code imports `**/server/**` or `server-only`), nitro (build only, preset `node-server`), then `viteReact`. Keep `tanstackStart` before `viteReact`. Nitro targets Node because Cloudflare Workers can't open TCP connections to PostgreSQL or write files to disk. Deploy by running `npm run build` and then `npm start`.
+
+`src/start.ts` registers `createCsrfMiddleware` for server functions. Auth is a cookie, so cross-site serverFn calls are rejected with 403 based on `Sec-Fetch-Site`/`Origin`. Scripted clients must send a same-origin `Origin` header.

@@ -44,7 +44,7 @@ const LEVEL_BRIEF: Record<AssessmentLevel, string> = {
     "applied, scenario-based reasoning for an experienced practitioner; include trade-offs and edge cases",
 };
 
-/** Generate multiple-choice questions with Lovable AI. Throws with a readable message on failure. */
+/** Generate multiple-choice questions with Groq. Throws with a readable message on failure. */
 export async function generateQuestionsWithAi(args: {
   skillName: string;
   category: string;
@@ -53,54 +53,41 @@ export async function generateQuestionsWithAi(args: {
   topics?: string;
   existingPrompts: string[];
 }): Promise<GeneratedQuestion[]> {
-  const key = process.env.LOVABLE_API_KEY;
-  if (!key) throw new Error("AI generation is not configured.");
+  const { completeJson, isAiConfigured, LLMClientError } = await import("./ai.server");
+  if (!isAiConfigured()) {
+    throw new Error("AI generation is not configured. Set BUSTLER_GROQ_API_KEY in .env.");
+  }
 
   const avoid = args.existingPrompts
     .slice(0, 40)
     .map((p) => `- ${p}`)
     .join("\n");
 
-  const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "Lovable-API-Key": key },
-    body: JSON.stringify({
-      model: "openai/gpt-5.6-sol",
-      response_format: { type: "json_object" },
-      messages: [
-        {
-          role: "system",
-          content:
-            'You write high-quality multiple-choice assessment questions for a professional skill verification platform. Reply ONLY with JSON of the shape {"questions":[{"prompt":string,"options":[string,string,string,string],"correctIndex":number,"explanation":string}]}. Exactly 4 options per question, exactly one unambiguously correct answer, plausible distractors, no "all of the above", no numbering in prompts, explanation under 40 words.',
-        },
-        {
-          role: "user",
-          content: [
-            `Skill: ${args.skillName} (${args.category})`,
-            `Level: ${args.level} — ${LEVEL_BRIEF[args.level]}`,
-            `Write exactly ${args.count} questions.`,
-            args.topics ? `Focus topics: ${args.topics}` : "",
-            avoid ? `Do not duplicate or paraphrase these existing questions:\n${avoid}` : "",
-          ]
-            .filter(Boolean)
-            .join("\n"),
-        },
-      ],
-    }),
-  });
-
-  if (res.status === 429) throw new Error("AI rate limit reached. Try again in a moment.");
-  if (res.status === 402) throw new Error("AI credits exhausted. Top up to keep generating.");
-  if (!res.ok) throw new Error("The AI generator could not be reached.");
-
-  const json = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-  const content = json.choices?.[0]?.message?.content;
-  if (!content) throw new Error("The AI generator returned an empty response.");
-
   let parsed: { questions?: unknown };
   try {
-    parsed = JSON.parse(content) as { questions?: unknown };
-  } catch {
+    parsed = await completeJson<{ questions?: unknown }>({
+      system:
+        'You write high-quality multiple-choice assessment questions for a professional skill verification platform. Reply ONLY with JSON of the shape {"questions":[{"prompt":string,"options":[string,string,string,string],"correctIndex":number,"explanation":string}]}. Exactly 4 options per question, exactly one unambiguously correct answer, plausible distractors, no "all of the above", no numbering in prompts, explanation under 40 words.',
+      user: [
+        `Skill: ${args.skillName} (${args.category})`,
+        `Level: ${args.level} — ${LEVEL_BRIEF[args.level]}`,
+        `Write exactly ${args.count} questions.`,
+        args.topics ? `Focus topics: ${args.topics}` : "",
+        avoid ? `Do not duplicate or paraphrase these existing questions:\n${avoid}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      // ~150 tokens per question, plus headroom for the model's reasoning.
+      maxTokens: 1024 + args.count * 250,
+      temperature: 0.7,
+    });
+  } catch (error) {
+    if (error instanceof LLMClientError) {
+      if (error.status === 429) throw new Error("AI rate limit reached. Try again in a moment.");
+      if (error.status === 401)
+        throw new Error("The Groq API key was rejected. Check BUSTLER_GROQ_API_KEY.");
+      throw new Error("The AI generator could not be reached.");
+    }
     throw new Error("The AI generator returned malformed output.");
   }
 

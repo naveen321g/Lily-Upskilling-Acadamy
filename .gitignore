@@ -24,6 +24,9 @@ dist-ssr
 # Personal, machine-specific Claude Code settings
 .claude/settings.local.json
 
+# Uploaded files (local storage for certificate uploads)
+.local-storage/
+
 # Wrangler / Cloudflare
 .wrangler/
 .dev.vars

@@ -34,7 +34,9 @@ function ResetPasswordPage() {
     const passR = passwordSchema.safeParse(password);
     if (!passR.success) return toast.error(passR.error.issues[0].message);
     setLoading(true);
-    const { error } = await supabase.auth.updateUser({ password: passR.data });
+    // The emailed reset link carries a one-time `?token=`.
+    const token = new URLSearchParams(window.location.search).get("token") ?? undefined;
+    const { error } = await supabase.auth.updateUser({ password: passR.data, token });
     setLoading(false);
     if (error) return toast.error(error.message);
     toast.success("Password updated. You're signed in.");

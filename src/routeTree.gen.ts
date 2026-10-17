@@ -27,6 +27,7 @@ import { Route as AuthenticatedAnalyticsRouteImport } from './routes/_authentica
 import { Route as AuthenticatedInterviewIndexRouteImport } from './routes/_authenticated/interview.index'
 import { Route as AuthenticatedAssessmentsIndexRouteImport } from './routes/_authenticated/assessments.index'
 import { Route as AuthenticatedAdminIndexRouteImport } from './routes/_authenticated/admin.index'
+import { Route as ApiStorageSplatRouteImport } from './routes/api.storage.$'
 import { Route as AuthenticatedSupportIdRouteImport } from './routes/_authenticated/support.$id'
 import { Route as AuthenticatedSkillsIdRouteImport } from './routes/_authenticated/skills.$id'
 import { Route as AuthenticatedSettingsNotificationsRouteImport } from './routes/_authenticated/settings.notifications'
@@ -139,6 +140,11 @@ const AuthenticatedAdminIndexRoute = AuthenticatedAdminIndexRouteImport.update({
   id: '/admin/',
   path: '/admin/',
   getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const ApiStorageSplatRoute = ApiStorageSplatRouteImport.update({
+  id: '/api/storage/$',
+  path: '/api/storage/$',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedSupportIdRoute = AuthenticatedSupportIdRouteImport.update({
   id: '/$id',
@@ -283,6 +289,7 @@ export interface FileRoutesByFullPath {
   '/settings/notifications': typeof AuthenticatedSettingsNotificationsRoute
   '/skills/$id': typeof AuthenticatedSkillsIdRoute
   '/support/$id': typeof AuthenticatedSupportIdRoute
+  '/api/storage/$': typeof ApiStorageSplatRoute
   '/admin/': typeof AuthenticatedAdminIndexRoute
   '/assessments/': typeof AuthenticatedAssessmentsIndexRoute
   '/interview/': typeof AuthenticatedInterviewIndexRoute
@@ -321,6 +328,7 @@ export interface FileRoutesByTo {
   '/settings/notifications': typeof AuthenticatedSettingsNotificationsRoute
   '/skills/$id': typeof AuthenticatedSkillsIdRoute
   '/support/$id': typeof AuthenticatedSupportIdRoute
+  '/api/storage/$': typeof ApiStorageSplatRoute
   '/admin': typeof AuthenticatedAdminIndexRoute
   '/assessments': typeof AuthenticatedAssessmentsIndexRoute
   '/interview': typeof AuthenticatedInterviewIndexRoute
@@ -361,6 +369,7 @@ export interface FileRoutesById {
   '/_authenticated/settings/notifications': typeof AuthenticatedSettingsNotificationsRoute
   '/_authenticated/skills/$id': typeof AuthenticatedSkillsIdRoute
   '/_authenticated/support/$id': typeof AuthenticatedSupportIdRoute
+  '/api/storage/$': typeof ApiStorageSplatRoute
   '/_authenticated/admin/': typeof AuthenticatedAdminIndexRoute
   '/_authenticated/assessments/': typeof AuthenticatedAssessmentsIndexRoute
   '/_authenticated/interview/': typeof AuthenticatedInterviewIndexRoute
@@ -401,6 +410,7 @@ export interface FileRouteTypes {
     | '/settings/notifications'
     | '/skills/$id'
     | '/support/$id'
+    | '/api/storage/$'
     | '/admin/'
     | '/assessments/'
     | '/interview/'
@@ -439,6 +449,7 @@ export interface FileRouteTypes {
     | '/settings/notifications'
     | '/skills/$id'
     | '/support/$id'
+    | '/api/storage/$'
     | '/admin'
     | '/assessments'
     | '/interview'
@@ -478,6 +489,7 @@ export interface FileRouteTypes {
     | '/_authenticated/settings/notifications'
     | '/_authenticated/skills/$id'
     | '/_authenticated/support/$id'
+    | '/api/storage/$'
     | '/_authenticated/admin/'
     | '/_authenticated/assessments/'
     | '/_authenticated/interview/'
@@ -493,6 +505,7 @@ export interface RootRouteChildren {
   ResetPasswordRoute: typeof ResetPasswordRoute
   CertificatesIdRoute: typeof CertificatesIdRoute
   VerifyIdRoute: typeof VerifyIdRoute
+  ApiStorageSplatRoute: typeof ApiStorageSplatRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -622,6 +635,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/admin/'
       preLoaderRoute: typeof AuthenticatedAdminIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/api/storage/$': {
+      id: '/api/storage/$'
+      path: '/api/storage/$'
+      fullPath: '/api/storage/$'
+      preLoaderRoute: typeof ApiStorageSplatRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/_authenticated/support/$id': {
       id: '/_authenticated/support/$id'
@@ -868,6 +888,7 @@ const rootRouteChildren: RootRouteChildren = {
   ResetPasswordRoute: ResetPasswordRoute,
   CertificatesIdRoute: CertificatesIdRoute,
   VerifyIdRoute: VerifyIdRoute,
+  ApiStorageSplatRoute: ApiStorageSplatRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
